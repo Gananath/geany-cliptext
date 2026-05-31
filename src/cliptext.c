@@ -27,6 +27,135 @@ static gint group_num = 0;
 static gint page_num = 0;
 
 
+/* Find group by name */
+static GArray *find_group(const gchar *group_name)
+{
+	GtkTreeModel *model;
+	GtkTreeIter iter;
+
+	model = gtk_combo_box_get_model(
+		GTK_COMBO_BOX(clip_file)
+	);
+
+	gboolean valid =
+		gtk_tree_model_get_iter_first(model, &iter);
+
+	gint index = 0;
+
+	while (valid) {
+
+		gchar *text = NULL;
+
+		gtk_tree_model_get(
+			model,
+			&iter,
+			0,
+			&text,
+			-1
+		);
+
+		if (g_strcmp0(text, group_name) == 0) {
+
+			g_free(text);
+
+			return g_ptr_array_index(
+				clip_array,
+				index
+			);
+		}
+
+		g_free(text);
+
+		valid =
+			gtk_tree_model_iter_next(
+				model,
+				&iter
+			);
+
+		index++;
+	}
+
+	return NULL;
+}
+
+
+/* Lookup placeholder inside [Special] */
+static const gchar *lookup_special(const gchar *name)
+{
+	GArray *specials =
+		find_group("Special");
+
+	if (!specials)
+		return NULL;
+
+	for (guint i = 0; i < specials->len; i++) {
+
+		Cliptext *clip =
+			&g_array_index(specials, Cliptext, i);
+
+		if (g_strcmp0(clip->name, name) == 0)
+			return clip->value;
+	}
+
+	return NULL;
+}
+
+
+/* Expand %name% placeholders */
+static gchar *expand_specials(const gchar *input)
+{
+	GString *out = g_string_new("");
+
+	const gchar *p = input;
+
+	while (*p) {
+
+		if (*p == '%') {
+
+			const gchar *end =
+				strchr(p + 1, '%');
+
+			if (end) {
+
+				gchar *name =
+					g_strndup(
+						p + 1,
+						end - p - 1
+					);
+
+				const gchar *value =
+					lookup_special(name);
+
+				if (value) {
+
+					g_string_append(
+						out,
+						value
+					);
+
+				} else {
+
+					g_string_append_len(
+						out,
+						p,
+						end - p + 1
+					);
+				}
+
+				g_free(name);
+
+				p = end + 1;
+				continue;
+			}
+		}
+
+		g_string_append_c(out, *p);
+		p++;
+	}
+
+	return g_string_free(out, FALSE);
+}
+
 
 void clear_row(gpointer data) {
 	Cliptext *clip_text = (Cliptext *)data;
@@ -55,12 +184,10 @@ static void cliptext_load(void)
 		g_ptr_array_set_size(clip_array, 0);
 	}
 	
-	/* Load config file: system (/usr/share/geany-plugins/cliptext/cliptext.conf) or replace by user (/home/user/.config/geany/plugins/cliptext/cliptext.conf) */
-	sys_file = g_build_filename(geany_data->app->datadir, "cliptext.conf", NULL);
+    /* Load config file: system (/usr/share/geany/snippets.conf) or replace by user (/home/user/.config/geany/snippets.conf) */
+	sys_file = g_build_filename(geany_data->app->datadir,  G_DIR_SEPARATOR_S,"snippets.conf", NULL);
 
-	user_file = g_strconcat(geany_data->app->configdir, G_DIR_SEPARATOR_S,
-		"plugins", G_DIR_SEPARATOR_S,
-		"cliptext", G_DIR_SEPARATOR_S, "cliptext.conf", NULL);
+	user_file = g_strconcat(geany_data->app->configdir, G_DIR_SEPARATOR_S,"snippets.conf", NULL);
 
 	if (g_file_test(user_file, G_FILE_TEST_IS_REGULAR)) {
 		g_key_file_load_from_file(config, user_file, G_KEY_FILE_NONE, NULL);
@@ -131,12 +258,37 @@ static void clip_replace(gchar *clip_value)
 	gint pos = sci_get_current_position(doc->editor->sci);
 	gint cursor_pos = -1;
 	
-	GString *clip_gstring = g_string_new(clip_value);
-	
-	/* gint cursor_pos = utils_string_find(clip_gstring, 0, -1, "%sel%"); */
-	gchar *sub = strstr(clip_gstring->str, "%sel%");
+	/* STEP 1: create original string */
+	GString *clip_gstring =
+		g_string_new(clip_value);
+
+
+	/* STEP 2: expand [Special] BEFORE anything else */
+	gchar *expanded =
+		expand_specials(clip_gstring->str);
+
+	g_string_assign(clip_gstring, expanded);
+	g_free(expanded);
+
+
+	/* STEP 3: find FIRST %cursor% (for cursor position) */
+	gchar *sub =
+		strstr(clip_gstring->str, "%cursor%");
+
 	if (sub != NULL) {
-		cursor_pos = (gint)(sub - clip_gstring->str);
+		cursor_pos =
+			(gint)(sub - clip_gstring->str);
+	}
+
+
+	/* STEP 4: remove ALL %cursor% occurrences safely */
+	while (strstr(clip_gstring->str, "%cursor%") != NULL) {
+
+		utils_string_replace_first(
+			clip_gstring,
+			"%cursor%",
+			""
+		);
 	}
 	
 	utils_string_replace_first(clip_gstring, "%sel%", selection);
