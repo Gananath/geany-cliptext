@@ -175,6 +175,64 @@ static void on_clip_clicked(GtkTreeView *tree_view,
 	}
 }
 
+static void select_group_for_current_document(void)
+{
+    GeanyDocument *doc = document_get_current();
+
+    if (!doc || !doc->file_type)
+        return;
+
+    const gchar *type_name = doc->file_type->name;
+
+    GtkTreeModel *model =
+        gtk_combo_box_get_model(GTK_COMBO_BOX(clip_file));
+
+    GtkTreeIter iter;
+    gboolean valid =
+        gtk_tree_model_get_iter_first(model, &iter);
+
+    gint index = 0;
+
+    while (valid)
+    {
+        gchar *group = NULL;
+
+        gtk_tree_model_get(
+            model,
+            &iter,
+            0,
+            &group,
+            -1
+        );
+
+        if (g_strcmp0(group, type_name) == 0)
+        {
+            gtk_combo_box_set_active(
+                GTK_COMBO_BOX(clip_file),
+                index
+            );
+
+            g_free(group);
+            return;
+        }
+
+        g_free(group);
+
+        valid =
+            gtk_tree_model_iter_next(model, &iter);
+
+        index++;
+    }
+}
+
+
+static void on_document_activate(GObject *obj,
+                                 GeanyDocument *doc,
+                                 gpointer user_data)
+{
+    select_group_for_current_document();
+}
+
 /*
 static void on_reload(GtkButton *button, gpointer user_data)
 {
@@ -228,6 +286,7 @@ static gboolean cliptext_init(GeanyPlugin *plugin, gpointer pdata)
 	g_signal_connect(clip_file, "changed", G_CALLBACK(on_group_changed), NULL);
 	g_signal_connect(tree_view, "row-activated", G_CALLBACK(on_clip_clicked), NULL);
 	
+    plugin_signal_connect(geany_plugin, NULL, "document-activate", FALSE, G_CALLBACK(on_document_activate), NULL);
 
 	page_num = gtk_notebook_append_page(GTK_NOTEBOOK(sidebar), clip_vbox, gtk_label_new("Cliptext"));
 	gtk_widget_show_all(clip_vbox);
